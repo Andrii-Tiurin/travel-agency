@@ -1,0 +1,334 @@
+import path from "path";
+import fs from "fs";
+
+// ─── Config types ────────────────────────────────────────────────────────────
+
+export interface HotToursSettings {
+  minPrice: number;
+  maxPrice: number;
+  priorityCountries: string[]; // country IDs for param 'ci'
+  instantConfirmOnly: boolean;
+  departureDaysFrom: number;
+  departureDaysTo: number;
+}
+
+export interface ApiConfig {
+  endpoint: string;
+  agencyId: string;
+  domainId: string;
+  authKey: string;
+  currency: string;
+  hotToursSettings: HotToursSettings;
+}
+
+// ─── CRM TAT API response types ──────────────────────────────────────────────
+
+export interface TatTour {
+  id?: number | string;
+  name?: string;
+  country?: string;
+  countryId?: number | string;
+  resort?: string;
+  resortId?: number | string;
+  hotel?: string;
+  hotelId?: number | string;
+  hotelStars?: number;
+  nights?: number;
+  dateFrom?: string; // departure date
+  dateTo?: string;
+  price?: number;
+  priceUah?: number;
+  priceEur?: number;
+  priceUsd?: number;
+  currency?: string;
+  discount?: number;
+  discountPercent?: number;
+  rating?: number;
+  reviews?: number;
+  meal?: string;      // питание: BB, HB, FB, AI etc.
+  room?: string;
+  transport?: string; // fly / bus
+  operator?: string;
+  operatorId?: number | string;
+  instant?: boolean;  // моментальное подтверждение
+  available?: number;
+  departureCity?: string;
+  departureCityId?: number | string;
+  images?: string[];
+  description?: string;
+  // Raw API may return snake_case or camelCase variants
+  [key: string]: unknown;
+}
+
+export interface TatApiResponse {
+  tours?: TatTour[];
+  data?: TatTour[];
+  result?: TatTour[] | { tours?: TatTour[] };
+  total?: number;
+  count?: number;
+  error?: string;
+  status?: string | number;
+}
+
+// ─── Search params passed from frontend ──────────────────────────────────────
+
+export interface TourSearchParams {
+  country?: string;       // country ID
+  resort?: string;        // resort ID
+  hotel?: string;         // hotel name/id
+  dateFrom?: string;      // departure date YYYY-MM-DD
+  dateTo?: string;        // departure date range end
+  nightsFrom?: number;
+  nightsTo?: number;
+  priceFrom?: number;
+  priceTo?: number;
+  adults?: number;
+  children?: number;
+  departureCity?: string;
+  stars?: string;         // hotel stars
+  meal?: string;
+  transport?: string;
+  instant?: boolean;
+  sort?: "price_asc" | "price_desc" | "rating" | "popular" | "discount";
+  page?: number;
+  limit?: number;
+}
+
+// ─── Config loader ────────────────────────────────────────────────────────────
+
+const CONFIG_PATH = path.join(process.cwd(), "data", "api-config.json");
+
+const DEFAULT_CONFIG: ApiConfig = {
+  endpoint: "https://crm.tat.ua/tf/tourscanner",
+  agencyId: "",
+  domainId: "",
+  authKey: "",
+  currency: "uah",
+  hotToursSettings: {
+    minPrice: 0,
+    maxPrice: 0,
+    priorityCountries: [],
+    instantConfirmOnly: false,
+    departureDaysFrom: 1,
+    departureDaysTo: 14,
+  },
+};
+
+export function loadApiConfig(): ApiConfig {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) return DEFAULT_CONFIG;
+    const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as Partial<ApiConfig>;
+    return {
+      ...DEFAULT_CONFIG,
+      ...parsed,
+      hotToursSettings: {
+        ...DEFAULT_CONFIG.hotToursSettings,
+        ...(parsed.hotToursSettings ?? {}),
+      },
+    };
+  } catch {
+    return DEFAULT_CONFIG;
+  }
+}
+
+export function saveApiConfig(config: ApiConfig): void {
+  if (!fs.existsSync(path.dirname(CONFIG_PATH))) {
+    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  }
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+}
+
+// ─── Build query string for CRM TAT ──────────────────────────────────────────
+
+export function buildTatQueryString(
+  config: ApiConfig,
+  params: TourSearchParams
+): string {
+  const today = new Date();
+
+  const qp = new URLSearchParams();
+
+  // Agency / domain / auth
+  if (config.agencyId) qp.set("a", config.agencyId);
+  if (config.domainId) qp.set("d", config.domainId);
+  if (config.authKey) qp.set("ca", config.authKey);
+
+  // Fixed params from HAR
+  qp.set("cu", config.currency || "uah");
+  qp.set("fl", "yes");  // flights
+  qp.set("ho", "yes");  // hotels
+
+  // Country
+  if (params.country) qp.set("ci", params.country);
+
+  // Resort
+  if (params.resort) qp.set("ri", params.resort);
+
+  // Hotel
+  if (params.hotel) qp.set("hi", params.hotel);
+
+  // Departure dates
+  if (params.dateFrom) {
+    qp.set("df", params.dateFrom);
+  }
+  if (params.dateTo) {
+    qp.set("dt", params.dateTo);
+  }
+
+  // Nights
+  if (params.nightsFrom) qp.set("nf", String(params.nightsFrom));
+  if (params.nightsTo) qp.set("nt", String(params.nightsTo));
+
+  // Price
+  if (params.priceFrom && params.priceFrom > 0) qp.set("pf", String(params.priceFrom));
+  if (params.priceTo && params.priceTo > 0) qp.set("pt", String(params.priceTo));
+
+  // Guests
+  if (params.adults) qp.set("ad", String(params.adults));
+  if (params.children !== undefined) qp.set("ch", String(params.children));
+
+  // Departure city
+  if (params.departureCity) qp.set("dc", params.departureCity);
+
+  // Hotel stars
+  if (params.stars) qp.set("hs", params.stars);
+
+  // Meal
+  if (params.meal) qp.set("ml", params.meal);
+
+  // Transport
+  if (params.transport) qp.set("tr", params.transport);
+
+  // Instant confirmation
+  if (params.instant) qp.set("ic", "yes");
+
+  // Sort
+  if (params.sort) {
+    const sortMap: Record<string, string> = {
+      price_asc: "price_asc",
+      price_desc: "price_desc",
+      rating: "rating",
+      popular: "popular",
+      discount: "discount_desc",
+    };
+    qp.set("s", sortMap[params.sort] ?? "price_asc");
+  }
+
+  // Pagination
+  if (params.page && params.page > 1) qp.set("pg", String(params.page));
+  if (params.limit) qp.set("lm", String(params.limit));
+
+  // Format
+  qp.set("fmt", "json");
+
+  void today; // suppress unused warning
+  return qp.toString();
+}
+
+// ─── Normalize TAT response to our internal Tour type ─────────────────────────
+
+export interface NormalizedTour {
+  id: string;
+  destination: string;
+  countryId: string;
+  countryName: string;
+  resort: string;
+  hotel: string;
+  hotelStars: number;
+  nights: number;
+  dateFrom: string;
+  price: number;
+  currency: string;
+  discount: number;
+  discountPercent: number;
+  rating: number;
+  meal: string;
+  operator: string;
+  instant: boolean;
+  departureCity: string;
+  gradient: string;
+  emoji: string;
+  tagKey: string;
+}
+
+const GRADIENTS = [
+  "from-blue-500 via-blue-400 to-cyan-400",
+  "from-teal-500 via-emerald-400 to-green-400",
+  "from-violet-500 via-purple-400 to-fuchsia-400",
+  "from-emerald-500 via-teal-400 to-cyan-400",
+  "from-orange-400 via-amber-400 to-yellow-400",
+  "from-pink-500 via-rose-400 to-red-400",
+  "from-blue-500 via-indigo-400 to-violet-400",
+  "from-yellow-400 via-orange-400 to-red-400",
+];
+
+const EMOJIS = ["🏝️", "🌴", "🏰", "🌿", "🗺️", "⛩️", "🏛️", "🎡", "🐘", "🫐"];
+
+function pickGradient(id: string | number): string {
+  const n = Math.abs(Number(String(id).replace(/\D/g, "")) || 0);
+  return GRADIENTS[n % GRADIENTS.length];
+}
+
+function pickEmoji(id: string | number): string {
+  const n = Math.abs(Number(String(id).replace(/\D/g, "")) || 0);
+  return EMOJIS[n % EMOJIS.length];
+}
+
+function pickTagKey(tour: TatTour): string {
+  if (tour.discountPercent && Number(tour.discountPercent) >= 20) return "hot_tag_deal";
+  if (tour.instant) return "hot_tag_popular";
+  const df = tour.dateFrom ?? "";
+  const daysDiff = df
+    ? Math.ceil((new Date(df).getTime() - Date.now()) / 86400000)
+    : 999;
+  if (daysDiff <= 7) return "hot_tag_trending";
+  return "hot_tag_new";
+}
+
+export function normalizeTatTour(raw: TatTour, index: number): NormalizedTour {
+  const id = String(raw.id ?? index);
+  // Support both camelCase and snake_case from API
+  const price =
+    Number(raw.price ?? raw.priceUah ?? raw["price_uah"] ?? 0);
+  const discount = Number(raw.discount ?? raw["discount"] ?? 0);
+  const discountPercent = Number(
+    raw.discountPercent ?? raw["discount_percent"] ?? raw["discountPercent"] ?? 0
+  );
+
+  return {
+    id,
+    destination: String(raw.hotel ?? raw.resort ?? raw.name ?? "—"),
+    countryId: String(raw.countryId ?? raw["country_id"] ?? ""),
+    countryName: String(raw.country ?? ""),
+    resort: String(raw.resort ?? ""),
+    hotel: String(raw.hotel ?? ""),
+    hotelStars: Number(raw.hotelStars ?? raw["hotel_stars"] ?? 0),
+    nights: Number(raw.nights ?? 7),
+    dateFrom: String(raw.dateFrom ?? raw["date_from"] ?? ""),
+    price,
+    currency: String(raw.currency ?? "UAH"),
+    discount,
+    discountPercent,
+    rating: Number(raw.rating ?? 0),
+    meal: String(raw.meal ?? ""),
+    operator: String(raw.operator ?? ""),
+    instant: Boolean(raw.instant),
+    departureCity: String(raw.departureCity ?? raw["departure_city"] ?? ""),
+    gradient: pickGradient(id),
+    emoji: pickEmoji(id),
+    tagKey: pickTagKey(raw),
+  };
+}
+
+export function extractTours(apiResponse: TatApiResponse): TatTour[] {
+  if (Array.isArray(apiResponse)) return apiResponse as TatTour[];
+  if (Array.isArray(apiResponse.tours)) return apiResponse.tours;
+  if (Array.isArray(apiResponse.data)) return apiResponse.data;
+  if (apiResponse.result) {
+    if (Array.isArray(apiResponse.result)) return apiResponse.result;
+    if (Array.isArray((apiResponse.result as { tours?: TatTour[] }).tours))
+      return (apiResponse.result as { tours: TatTour[] }).tours;
+  }
+  return [];
+}
