@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     nightsTo: sp.get("nightsTo") ? Number(sp.get("nightsTo")) : undefined,
     adults: sp.get("adults") ? Number(sp.get("adults")) : 2,
     children: sp.get("children") ? Number(sp.get("children")) : 0,
-    departureCity: sp.get("departureCity") ?? config.domainId ?? undefined,
+    departureCity: sp.get("departureCity") || "870",
     stars: sp.get("stars") ?? undefined,
     meal: sp.get("meal") ?? undefined,
     transport: sp.get("transport") ?? "air",

@@ -101,27 +101,6 @@ type DisplayTour = {
   imageUrl?: string;
 };
 
-
-const COUNTRY_ID_TO_KEY: Record<string, string> = {
-  "115": "country_turkey",
-  "43": "country_egypt",
-  "34": "country_greece",
-  "49": "country_spain",
-  "92": "country_uae",
-  "113": "country_thailand",
-  "134": "country_croatia",
-  "79": "country_maldives",
-  "47": "country_bali",
-  "8": "country_austria",
-  "48": "country_italy",
-  "135": "country_montenegro",
-  "13": "country_bulgaria",
-  "114": "country_tunisia",
-  "75": "country_morocco",
-  "54": "country_cyprus",
-  "29": "country_vietnam",
-};
-
 function fromNormalized(t: NormalizedTour): DisplayTour {
   return {
     id: t.id,
@@ -129,7 +108,6 @@ function fromNormalized(t: NormalizedTour): DisplayTour {
     destination: t.destination,
     hotel: t.hotel,
     countryName: t.countryName,
-    countryKey: COUNTRY_ID_TO_KEY[t.countryId] || undefined,
     resort: t.resort,
     nights: t.nights,
     dateFrom: t.dateFrom,
@@ -256,7 +234,7 @@ function SearchContent() {
 
   const formatPrice = (price: number, currency?: string) => {
     if (!currency || currency === "UAH" || currency === "uah")
-      return `€${price.toLocaleString("de-DE")}`;
+      return `${price.toLocaleString("de-DE")} ₴`;
     if (currency === "EUR" || currency === "eur")
       return `€${price.toLocaleString("de-DE")}`;
     if (currency === "USD" || currency === "usd")

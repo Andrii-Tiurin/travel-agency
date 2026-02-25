@@ -51,7 +51,7 @@ export async function GET() {
   const fetches = countries.map(async (countryId) => {
     const params: TourSearchParams = {
       country: countryId,
-      departureCity: config.domainId || "870", // Default Berlin if not set
+      departureCity: "870" || "870", // Default Berlin if not set
       dateFrom,
       dateTo,
       nightsFrom: 7,
